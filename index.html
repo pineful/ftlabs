@@ -578,5 +578,217 @@ footer{background:var(--ink);color:#8FA0B8}
     <span>ftlabs.kr · pineful@ftlabs.kr · © 2026 FTLabs</span>
   </div>
 </section>
+
+<!-- OpenMotion ① 히어로 CI 조립 (1.0초, 한 번) — 원본: work/openmotion-site-proposals/motion/ -->
+<style data-openmotion>
+/* 초기 상태만 CSS로 잡아 둔다(첫 프레임 깜빡임 방지).
+ * 실제 값은 매 프레임 JS가 인라인 스타일로 덮어쓴다. html.m-anim 은 스크립트가
+ * 살아 있을 때만 붙으므로, JS가 없으면 지금 라이브 화면 그대로 보인다. */
+html.m-anim .mark-panel::before {
+  inset: calc(var(--mp-in, 14px) + (1 - var(--mf, 1)) * var(--mp-tr, 118px));
+  opacity: var(--mf, 1);
+}
+@media (max-width: 680px) {
+  /* 라이브와 같은 11px, 이동량은 카드 높이에 맞춰 줄인다 */
+  html.m-anim .mark-panel::before { --mp-in: 11px; --mp-tr: 51px; }
+}
+html.m-anim .mark-panel svg > g:first-of-type > path {
+  opacity: 0;
+}
+html.m-anim .mark-panel svg > g:nth-of-type(2) {
+  clip-path: inset(0 100% 0 0);
+}
+
+/* 검토용 조작 막대 */
+.m-ctl {
+  position: fixed; right: 18px; bottom: 18px; z-index: 9999;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 14px;
+  background: rgba(13, 17, 23, .88);
+  color: #D5DBE3;
+  border-radius: 4px;
+  font: 500 12px/1 "Pretendard", system-ui, sans-serif;
+  letter-spacing: -.01em;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(6px);
+}
+.m-ctl-l { opacity: .55; margin-right: 4px; }
+.m-ctl button {
+  font: inherit; color: #fff; cursor: pointer;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 3px; padding: 7px 10px;
+}
+.m-ctl button:hover { background: rgba(255, 255, 255, .16); }
+</style>
+<script data-openmotion>
+document.documentElement.classList.add('m-anim');
+try {
+/* OpenMotion 적용 시안 — 공통 모션 엔진
+ *
+ * 설계 원칙(openmotion `animation-discipline.md`):
+ *  - 모든 값은 시간 t의 순수 함수. `setTime(초)`로 어느 순간이든 같은 결과가 나온다.
+ *    (프레임 단위 결정적 렌더 = 하이퍼프레임즈의 seek 계약과 같은 방식)
+ *  - 한 번 재생하고 끝난다. 반복 루프 없음, 스크롤 가로채기 없음.
+ *  - translate/scale/clip 을 쓰는 모션은 `prefers-reduced-motion: reduce`에서 통째로 걷어내고
+ *    최종 상태(정지 화면)로 바로 간다.
+ *  - 모션은 상태 변화를 '확인'하는 데만 쓴다. 콘텐츠는 JS가 없어도 그대로 보인다.
+ */
+(function () {
+  var doc = document.documentElement;
+  var qs = new URLSearchParams(location.search);
+  var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var reduced = mq.matches || qs.get('rm') === '1';
+  var still = qs.has('still') ? parseFloat(qs.get('still')) : null;
+  var showCtl = qs.get('ctl') === '1' && still === null;
+  var tracks = [];
+  var raf = null, t0 = 0, t = 0, playing = false, ended = false;
+
+  var M = {
+    time: 0,
+    reduced: reduced,
+    register: function (fn) { tracks.push(fn); fn(0); return M; },
+    setTime: function (sec) {
+      t = sec;
+      M.time = sec;
+      for (var i = 0; i < tracks.length; i++) tracks[i](sec);
+      return sec;
+    },
+    // 화면 구조가 예상과 다르면 모션을 걸지 않고 라이브 모습 그대로 보여준다
+    fail: function () { doc.classList.remove('m-anim'); },
+    play: function () {
+      if (reduced) { M.setTime(99); return; }
+      if (playing) return;
+      playing = true;
+      ended = false;
+      t0 = 0;
+      M.setTime(0);
+      raf = requestAnimationFrame(step);
+    },
+    stop: function () {
+      if (raf) cancelAnimationFrame(raf);
+      raf = null; playing = false;
+    }
+  };
+  window.__motion = M;
+
+  function step(now) {
+    if (!t0) t0 = now;
+    var sec = (now - t0) / 1000;
+    M.setTime(sec);
+    if (sec >= M.duration) { playing = false; return; }
+    raf = requestAnimationFrame(step);
+  }
+
+  /* ---- 공용 이징 ---- */
+  var E = {
+    clamp: function (x, a, b) { a = a || 0; b = b === undefined ? 1 : b; return x < a ? a : x > b ? b : x; },
+    // 0→1 구간 진행률
+    at: function (t, start, dur) { return E.clamp((t - start) / dur); },
+    // M3 standard: cubic-bezier(.2,0,0,1) 근사 (front-loaded, settles)
+    out: function (x) { x = E.clamp(x); return 1 - Math.pow(1 - x, 3); },
+    inOut: function (x) { x = E.clamp(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; },
+    // 감쇠 진동: 플럭(현을 튕김) 뒤 진폭이 지수로 줄어드는 물리
+    ring: function (age, tau, freq, phase) {
+      if (age <= 0) return 0;
+      return Math.exp(-age / tau) * Math.sin(2 * Math.PI * freq * age + (phase || 0));
+    }
+  };
+  window.ME = E;
+
+  /* ---- 검토용 조작 막대 (본편에서는 ?ctl=1 일 때만 뜬다) ---- */
+  function controls(label) {
+    if (!showCtl) return;
+    var bar = document.createElement('div');
+    bar.className = 'm-ctl';
+    bar.innerHTML = '<span class="m-ctl-l">' + (label || '모션 시안') + '</span>' +
+      '<button type="button" data-a="replay">↺ 다시 재생</button>' +
+      '<button type="button" data-a="toggle">모션 없이 보기</button>';
+    document.body.appendChild(bar);
+    var toggle = bar.querySelector('[data-a=toggle]');
+    var isOff = false;
+    bar.addEventListener('click', function (ev) {
+      var a = ev.target.getAttribute && ev.target.getAttribute('data-a');
+      if (a === 'replay') { isOff = false; toggle.textContent = '모션 없이 보기'; M.play(); }
+      if (a === 'toggle') {
+        isOff = !isOff;
+        if (isOff) { M.stop(); M.setTime(99); toggle.textContent = '모션 보기'; }
+        else { toggle.textContent = '모션 없이 보기'; M.play(); }
+      }
+    });
+  }
+
+  M.boot = function (opts) {
+    opts = opts || {};
+    M.duration = opts.duration || 1.6;
+    controls(opts.label);
+    if (reduced) { M.setTime(99); return; }
+    if (still !== null) { M.setTime(still); return; }
+    M.play();
+    // 안전장치: 어떤 이유로든 재생이 멈춰도 2.5초 뒤에는 최종 상태로 둔다
+    setTimeout(function () { if (M.time < M.duration) M.setTime(99); }, 2500);
+  };
+
+  // 사용자가 중간에 OS 설정을 바꾸면 즉시 반영
+  if (mq.addEventListener) mq.addEventListener('change', function (e) {
+    reduced = e.matches; M.reduced = reduced;
+    if (reduced) { M.stop(); M.setTime(99); }
+  });
+})();
+/* FTLabs ① 히어로 CI 패널 — "층을 쌓는 순서"
+ *
+ * 정본 CI(입체 3단 심볼)는 '기반기술'이라는 이름처럼 세 개의 층으로 되어 있다.
+ * 첫 화면에서 그 층이 아래에서 위로 한 층씩 놓이고, 마지막에 워드마크가
+ * 왼쪽에서 오른쪽으로 새겨진다. 1.1초에 끝나고 그대로 멈춘다.
+ * 왼쪽 제목·본문은 건드리지 않는다(모션 예산은 한 곳에만).
+ */
+(function () {
+  var panel = document.querySelector('.mark-panel');
+  if (!panel) return;
+  var svg = panel.querySelector('svg');
+  var gs = svg ? svg.querySelectorAll('g') : [];
+  var paths = gs.length >= 2 ? gs[0].querySelectorAll('path') : [];
+  if (!svg || gs.length < 2 || paths.length < 6) { window.__motion.fail(); return; }
+  var sym = gs[0];
+  var word = gs[1];
+
+  // [좌회색, 우회색] 짝. 페이지의 path 순서: 회색 3개(top→bottom) 다음 흰색 3개(top→bottom)
+  var FLOORS = [
+    { i: [2, 5], at: 0.14 }, // 아래층(기반)
+    { i: [1, 4], at: 0.24 }, // 가운데층
+    { i: [0, 3], at: 0.34 }  // 위층
+  ];
+  var RISE = 16, DUR = 0.30;
+
+  window.__motion.register(function (t) {
+    // 카드 안쪽 헤어라인이 중앙에서 바깥으로 자리를 잡는다
+    var f = ME.out(ME.at(t, 0.04, 0.52));
+    panel.style.setProperty('--mf', f.toFixed(4));
+
+    for (var k = 0; k < FLOORS.length; k++) {
+      var fl = FLOORS[k];
+      var e = ME.out(ME.at(t, fl.at, DUR));
+      var y = (1 - e) * RISE;
+      for (var j = 0; j < fl.i.length; j++) {
+        var p = paths[fl.i[j]];
+        if (e >= 1) {
+          p.style.opacity = '1';
+          p.style.transform = 'none';
+        } else {
+          p.style.opacity = e.toFixed(4);
+          p.style.transform = 'translateY(' + y.toFixed(2) + 'px)';
+        }
+      }
+    }
+
+    // 워드마크: 왼쪽에서 오른쪽으로 새긴다 (끝나면 클립을 아예 걷어 라이브와 같은 래스터로 돌린다)
+    var w = ME.out(ME.at(t, 0.44, 0.42));
+    word.style.clipPath = w >= 1 ? 'none' : 'inset(0 ' + ((1 - w) * 100).toFixed(2) + '% 0 0)';
+  });
+
+  window.__motion.boot({ duration: 1.0, label: 'FTLabs ① 히어로 CI' });
+})();
+} catch (e) { document.documentElement.classList.remove('m-anim'); }
+</script>
 </body>
 </html>
