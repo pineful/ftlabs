@@ -55,6 +55,7 @@
   --ink:#0D1117;
   --ink-2:#39424E;
   --ink-3:#5D6673;
+  --ink-4:#616D7C;
   --line:#E3E6EA;
   --line-2:#EFF1F4;
   --paper:#FFFFFF;
@@ -207,8 +208,14 @@ section{padding:0}
 .fs-rule{position:absolute;left:64px;right:64px;top:58px;height:1px;background:var(--line)}
 .fs.dark{background:var(--ink)}
 .fs.dark .fs-h b{color:#E8EDF5}
-.fs.dark .fs-h span,.fs.dark .fs-h i{color:#5C6A80}
+.fs.dark .fs-h span,.fs.dark .fs-h i{color:#6E7D94}
 .fs.dark .fs-rule{background:rgba(255,255,255,.12)}
+/* 밝은 바탕 장면(01·03·04): 보조 라벨·캡션이 다크 밴드(#film)의 흰 글자색을 물려받지 않도록 잉크색을 명시한다.
+   배경(#fff·#F6F7F9) 대비 4.5:1 이상 — --ink-4 #616D7C = 5.27:1 / 4.91:1 */
+.fs1,.fs3,.fs4{color:var(--ink)}
+.fs1 .fs-h span,.fs1 .fs-h i,.fs3 .fs-h span,.fs3 .fs-h i,.fs4 .fs-h span,.fs4 .fs-h i{color:var(--ink-4)}
+.fs1 .f1-list span,.fs1 .f1-lead,.fs1 .f1-foot,.fs3 .f3-sub,.fs3 .f3-rows span,.fs4 .f4-row .ds,.fs4 .f4-disc{color:var(--ink-2)}
+.fs3 .f3-rows i,.fs4 .f4-role,.fs4 .f4-role i,.fs4 .f4-glab span,.fs4 .f4-row .co small,.fs4 .f4-cap{color:var(--ink-4)}
 /* 01 회사 */
 .fs1{background:#fff}
 .f1-h{position:absolute;left:64px;top:116px;width:660px;margin:0;font-size:52px;line-height:1.16;font-weight:600;letter-spacing:-.04em;color:var(--ink)}
